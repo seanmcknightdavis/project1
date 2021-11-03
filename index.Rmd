@@ -19,73 +19,205 @@ tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
 
 ## Data Wrangling, Exploration, Visualization
 
-### Name and EID here
+### Sean Davis smd3484
 
 #### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc.
+I would like to preface this by saying I am in no way or form economically or finance inclined but I have chosen to analyze two data sets from Kaggle that are very finance related: Avocado prices and all stocks on the S&P 500. I do not think I had any particular hypothesis to test when choosing these two data sets, just some general curiosity to see if there are any relations that could present themselves. Maybe people eat more avocados when the stock market is doing okay. The avocado data set contains 14 variables of various PLU codes and bag sizes as well as the locations where the price collection was happening. Although much of these data points are interesting I will just be focusing on their average price and volume for the dates listed. The S&P500 data set is pretty simple with just the opening price of a stock during a day, the high, the low, it's close, its volume, and of course its identifying ticker or name. 
 
 ```{R}
-# read your datasets in here, e.g., with read_csv()
-
+library(tidyverse)
+avocado = read.csv("~/project1/avocado.csv")
+stocks = read.csv("~/project1/all_stocks_5yr.csv")
+glimpse(avocado)
+glimpse(stocks)
 ```
 
 #### Tidying: Reshaping
 
-If your datasets are tidy already, demonstrate that you can reshape data with pivot wider/longer here (e.g., untidy and then retidy). Alternatively, it may be easier to wait until the wrangling section so you can reshape your summary statistics. Note here if you are going to do this.
+I did not really see any use for pivoting longer or wider when dealing with the variables I wanted to analyze from the two data sets. 
 
 ```{R}
 # your tidying code (if applicable; can also wait until wrangling section)
-```
 
+avocado <- avocado %>% pivot_longer(contains("X4"), names_to = "PLU", values_to = "AmountPLU")
+glimpse(avocado)
+```
+Here we are pivoting longer to have the included PLU codes be contained all in their own column. 
+
+```{R}
+
+
+avocado <- avocado %>% pivot_wider(names_from = PLU, values_from = AmountPLU)
+glimpse(avocado)
+
+```
+And here we are pivoting wider to put everything back where it was before. 
     
 #### Joining/Merging
 
 ```{R}
-# your joining code
+### pct_change: calculates the percent change of one value from the previous value
+pct_change<- function(x) {(x-lag(x))/lag(x)}
 
-# your joining code
+### Creating columns for the average daily price of an avocado across all regions in a day and the total amount of avocados sold in a day across all regions. 
+avocado2 <- avocado %>% group_by(Date) %>% summarise(avocadoAvg = mean(AveragePrice),avocadoVol = sum(Total.Volume))
+
+
+```
+The pct_change function is for computing percent change that we used with our worksheets dealing with Texas housing. I chose to do some wrangling before the join for simplicity's sake. The avocado dataset has 54306 distinct entries since the data is location based. For our observations I chose to take the average price of all locations for a particular day which amounted to 169 observations. 
+```{R}
+### Here I am adding a column for the daily percent change since I found that this didn't work after doing the join. 
+avocado2 <- avocado2 %>% mutate(avocadoChg=pct_change(avocadoAvg))
+### Moving the observation date forward one day in avocado.  
+avocado2$Date <- as.Date(avocado2$Date) + 1
+```
+So after deciding I wanted to use these particular data sets I found out that the dates for which the avocado prices and sales were calculated were always on a Sunday. Stock markets are not open on Sundays in the USA so I had to move all the dates on the Avocado dataset forward by a day. I know this is a bit hacky but I assume the avacado daily price doesnt change that much from Sundays to Mondays. 
+
+```{R}
+stocks$date <- as.Date(stocks$date)
+
+stockacado <- inner_join(avocado2,stocks,by=c("Date" = "date"))
+glimpse(stockacado)
 ```
 
-Discussions of joining here. Feel encouraged to break up into more than once code chunk and discuss each in turn.
+Since I changed the datatype of the Date in the avocado data set I had to change the format of date in the stock data set to match in order to make the join on their respective dates. By doing an inner join we lost all the days of the week other than Mondays in the stocks data set as well as the dates that were not included in the avocado data set. We are left with our data for 169 mondays of each stock in the S&P500 and that amounts to 71564 observations. Note, this is less than 500 * 169 = 84500 since the avocado dates extend a bit past our data set for stocks and some companies in our data set have less observations that others due to them being moved out of or coming in later to the S&P500.
+
+Truthfully, I think I would rather have joined in another way that had the data from avocado in its own row for each date similar to how the companies have their own row. I was not sure how to accomplish this since we did need to have a join and that seems more like an append to the bottom of another data set. Instead, we have duplicated data for avocados in every row for every company at a certain date but it should work fine for our purposes. 
 
 ####  Wrangling
 
 ```{R}
-# your wrangling code
 
-# your wrangling code
+stockacado %>% group_by(Name) %>% count %>% arrange(desc(n))
 
-# your wrangling code
+```
+Note, 144 seems to be the max amount of days we have data for on a stock and avocados. 
+
+```{R}
+stockacado %>% group_by(Name) %>% count %>% arrange(n)
+```
+Seems we have stocks with much lower amounts of observations.
+Lets see how many don't have the max amount of observations. 
+```{R}
+stockacado %>% group_by(Name) %>% count %>% filter(n != 144)
+```
+Lets remove any companies that we don't have data for all of our days. 
+```{R}
+outliers <- stockacado %>% group_by(Name) %>% count %>% filter(n < 144)
+stockacado <- anti_join(stockacado,outliers)
+
+
+stockacado %>% group_by(Date)%>% count
 ```
 
-Your discussion of wrangling section here. Feel encouraged to break up into more than once code chunk and discuss each in turn.
+Do any of the tickers from our company names share 3 of the same letters with avocado?
+```{R}
+str_subset(unique(stockacado$Name),"[AVCDO]{3}")
+```
+Don't think any of these companies are associated with Avocados production..
+
+
+Lets look at Walmart's price change percent along side the percent change in avacado prices. 
+```{R}
+
+stockacado %>% filter(Name == "WMT") %>%  summarise(weeklyPctChange = pct_change(open), avoPct = avocadoChg)
+```
+Now, Lets create a new column called pct_change that calculates the percent change in price from the previous week. 
+```{R}
+stockacado <- stockacado %>% group_by(Name) %>% mutate(pct_change = pct_change(open))
+
+
+```
+Any interesting correlations between the percent price changes between avocados and Kroger?
+```{R}
+
+
+stockacado %>% filter(Name == "KR") %>% na.omit() %>% summarise(correlation = cor(pct_change,avocadoChg))
+```
+Doesn't seem so...
+
+What about Costco?
+```{R}
+
+stockacado %>% filter(Name == "COST") %>% na.omit() %>% summarise(correlationn = cor(pct_change,avocadoChg))
+
+```
+Again not really.
+
+Lets take a look at some of our top performing stocks.
+```{R}
+stockacado %>% group_by(Name) %>% na.omit() %>% summarise(Change_in_Percent = sum(pct_change)*100) %>% arrange(desc(Change_in_Percent)) %>% slice_head(n = 10) %>% knitr::kable()
+```
+
+
+```{R}
+stockacado %>% group_by(Name) %>% na.omit() %>% summarise(corAll = cor(pct_change,avocadoChg)) %>% arrange(desc(corAll))
+```
+Even the highest correlation values between price change of avocados don't really imply a relation.. 
+
+What about negative correlations?
+```{R}
+
+stockacado %>% group_by(Name) %>% na.omit() %>% summarise(corAll = cor(pct_change,avocadoChg)) %>% arrange(corAll)
+```
+Again not really.. 
+
+Lets look at the relations between just the price of avocados and price of stocks in the S&P500
+
+```{R}
+
+stockacado %>% group_by(Name) %>% summarise(cor = cor(open,avocadoAvg)) %>% arrange(desc(cor))
+
+```
+
+This looks like some decently strong correlations between the price of avocados and some companies in the S&P 500!
+
+Lets look at negative side.
+```{R}
+stockacado %>% group_by(Name) %>% summarise(cor = cor(open,avocadoAvg)) %>% arrange(cor)
+```
+Even stronger negative correlations! Seems there might be some connection between Kroger Grocery Store stock prices and Avocado prices. 
+
+
+Lets make a column that sums up the entire price change of all the companies in the S&P500 for that particular day. 
+```{R}
+
+stockacado <- stockacado %>% group_by(Date) %>% na.omit() %>% mutate(SP500Chg = sum(pct_change)/486)
+```
+
+Lets make another column for the average opening price of all the companies in the S&P500 for that particular day.
+```{R}
+# Average opening price for S&P 500 stock on that day. 
+stockacado <- stockacado %>% group_by(Date) %>% mutate(SP500Avg = sum(open)/486)
+
+
+
+
+
+```
+
+
 
 
 #### Visualizing
 
 ```{R}
-# your plot 1
+stockacado %>% group_by(Date) %>% ggplot(aes(x = Date, y = SP500Chg))  + geom_line(aes(color = "S&P500")) + geom_line(aes(y = avocadoChg, color = "Avocado")) + geom_bar(stat = "summary", alpha = .4, fill = "turquoise1") + geom_bar(aes(y = avocadoChg), stat = "summary", alpha = .4, fill = "coral" )+ xlab("Date") + ylab("Percent change in price") + ggtitle("Percent change in price of S&P500 and Avocados") + theme_classic() +scale_color_discrete(name="") + scale_y_continuous(labels=scales::percent , breaks = scales::pretty_breaks(n = 10)) 
 ```
-
-Your discussion of plot 1
+Like I said before, finance is definitely not my strong suite. I suppose the inference we are supposed to draw from this graph is that there doesn't seem to be much of overlap of the average price change in the S&P500 and the average price change of an avocado. This graph allowed me to toy around with some of the library named scales, however I did give up on the challenge of creating a date vector to allow me to break up the x-axis for the interest of time.  
 
 ```{R}
-# your plot 2
+stockacado %>% filter(Name == "KR") %>% ggplot(aes(x = avocadoAvg, y = open)) + geom_point(size = .7, color ="brown") + geom_smooth(alpha = .1, size = .7, method = "lm") + theme_minimal() + xlab("Average price per Avocado") + ylab("Kroger Co open price") + ggtitle("KR stock price versus Avocado price") + scale_y_continuous(labels=scales::dollar, breaks = scales::pretty_breaks(n = 10)) + scale_x_continuous(labels=scales::dollar)
 ```
-
-Your discussion of plot 2
+This graph is again an illustration of the interesting negative relation between the price of Avocados and stocks of Kroger Grocery Stores. I chose to use the opening price in all of these comparisons because, as I noted before, the Avocado prices are actually from Sunday. I suppose the opening price on a Monday of the stockmarket is the closest thing to an avocado price check on a Sunday. I suppose we could say duh of course there is a strong correlation there, as things get hard for the grocery stores they jack up prices. But as we see from the next graph it's not as easy to explain why things are related.
 
 ```{R}
-# your plot 3
+stockacado %>% filter(Name == "TSCO") %>% ggplot(aes(x = avocadoAvg, y = open)) + geom_point(color = "white", size = .7) + geom_smooth(alpha = .4, size = .6,method = "lm",  color = "coral3") + theme_dark() + xlab("Average price per Avocado") + ylab("Tractor Supply Co. open price") + ggtitle("TSCO stock price versus Avocado price") + scale_y_continuous(labels=scales::dollar) + scale_x_continuous(labels=scales::dollar)
 ```
 
-Your discussion of plot 3
+As we can see there seems to be a fairly strong negative correlation between Tractor Suppply Co. stock value and Avocado prices as well. Upon inspection it seems the dots on this graph are in similarly clustered groups with the Kroger chart above. I would bet that there's some similarities going on with Kroger and TSCO prices. Perhaps we should do another chart in the future.
 
-#### Concluding Remarks
-
-If any!
-
-
+Ultimately, I think that the stockmarket lends some really interesting data and allows for some interesting conjectures to be made about what motivates certain movements and why certain things are associated with each other. Already you can see that that there's many more interesting things to explore and more fun things to attempt to speculate upon. 
 
 
